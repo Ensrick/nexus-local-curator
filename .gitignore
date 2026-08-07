@@ -1,0 +1,13 @@
+node_modules/
+web-ext-artifacts/
+coverage/
+extension/.amo-upload-uuid
+*.xpi
+*.zip
+.env
+.env.*
+*api*key*
+*diagnostics*.json
+nexus-local-curator*.json
+nexus-local-curator*.csv
+!community/blocklist.csv

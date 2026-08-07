@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Curated Nexus Catalogue</title>
+  <link rel="stylesheet" href="catalog.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <p class="eyebrow">Nexus Local Curator</p>
+        <h1>Curated catalogue</h1>
+        <p class="lede">One lightweight Nexus source page at a time, filtered against your private lists entirely in Firefox.</p>
+      </div>
+      <button id="open-manager" type="button">Manage lists and backup</button>
+    </header>
+
+    <section class="catalog-toolbar" aria-label="Catalogue controls">
+      <label>Game
+        <select id="game-domain">
+          <option value="skyrimspecialedition">Skyrim Special Edition</option>
+          <option value="skyrim">Skyrim</option>
+        </select>
+      </label>
+      <label>Order
+        <select id="catalog-sort">
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="updated">Recently updated</option>
+          <option value="downloads">Most downloaded</option>
+          <option value="endorsements">Most endorsed</option>
+          <option value="name">Name</option>
+        </select>
+      </label>
+      <button id="load-catalog" type="button">Continue to next source page</button>
+      <div id="catalog-summary" class="summary" aria-live="polite"></div>
+    </section>
+
+    <p id="catalog-status" class="catalog-status" role="status" aria-live="polite"></p>
+    <div id="catalog-grid" class="catalog-grid"></div>
+  </main>
+
+  <script src="shared.js"></script>
+  <script src="api-core.js"></script>
+  <script src="catalog.js"></script>
+</body>
+</html>

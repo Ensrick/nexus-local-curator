@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Nexus Local Curator">
+  <defs>
+    <linearGradient id="background" x1="18" y1="12" x2="112" y2="120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#30251a"/>
+      <stop offset="1" stop-color="#151515"/>
+    </linearGradient>
+  </defs>
+  <rect x="5" y="5" width="118" height="118" rx="27" fill="url(#background)" stroke="#ef9e3b" stroke-width="8"/>
+  <path d="M64 22 102 36v26c0 23-14 39-38 48C40 101 26 85 26 62V36l38-14Z" fill="#ef9e3b"/>
+  <path d="M64 30 94 41v21c0 18-10 31-30 40-20-9-30-22-30-40V41l30-11Z" fill="#211b16"/>
+  <circle cx="64" cy="53" r="14" fill="#f7f3ed"/>
+  <path d="M40 85c3-14 12-22 24-22s21 8 24 22c-7 7-15 12-24 16-9-4-17-9-24-16Z" fill="#f7f3ed"/>
+  <rect x="34" y="70" width="60" height="13" rx="6.5" fill="#ef9e3b" transform="rotate(-34 64 76.5)"/>
+</svg>

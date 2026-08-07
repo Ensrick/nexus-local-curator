@@ -1,0 +1,22 @@
+{
+  "name": "nexus-local-curator",
+  "version": "0.12.8",
+  "private": true,
+  "description": "A Firefox-first author filter and API-powered curated catalogue for Nexus Mods.",
+  "engines": {
+    "node": "^24.15.0"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "lint": "web-ext lint --source-dir extension",
+    "build": "web-ext build --source-dir extension --artifacts-dir web-ext-artifacts --overwrite-dest",
+    "check": "npm run test && npm run lint && npm run build",
+    "sign:unlisted": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sign-unlisted.ps1",
+    "credential:save": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/save-amo-credential.ps1",
+    "credential:portable": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/export-portable-amo-credential.ps1"
+  },
+  "devDependencies": {
+    "jsdom": "30.0.1",
+    "web-ext": "10.6.0"
+  }
+}

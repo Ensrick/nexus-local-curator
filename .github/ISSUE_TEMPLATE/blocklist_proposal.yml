@@ -1,0 +1,35 @@
+name: Community blocklist proposal
+description: Propose a reversible change to the public discovery-preference list
+title: "[Blocklist]: "
+labels: [blocklist]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This list records discovery preferences, not allegations. Include only public Nexus usernames/user IDs. Never include API keys, private notes, email addresses, or personal information.
+  - type: input
+    id: username
+    attributes:
+      label: Public Nexus username
+    validations:
+      required: true
+  - type: input
+    id: user_id
+    attributes:
+      label: Public Nexus user ID (if known)
+  - type: dropdown
+    id: change
+    attributes:
+      label: Requested change
+      options:
+        - Add
+        - Remove or correct
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I included no API key, private note, or personal contact information.
+          required: true

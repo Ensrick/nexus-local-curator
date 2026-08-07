@@ -1,0 +1,40 @@
+name: Bug report
+description: Report incorrect filtering, counts, pagination, or extension behavior
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never paste your Nexus API key.** Safe diagnostics intentionally contain no key or list identities.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Include the filter selected and what you expected to see.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Extension version
+      placeholder: 0.7.1
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Privacy-safe diagnostics
+      description: Paste the contents of Manage → Export safe diagnostics. Check it before posting. Never add your API key.
+      render: json
+  - type: dropdown
+    id: firefox
+    attributes:
+      label: Firefox channel
+      options:
+        - Release
+        - Beta
+        - Developer Edition
+        - Nightly
+    validations:
+      required: true

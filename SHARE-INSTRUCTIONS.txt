@@ -1,0 +1,34 @@
+Nexus Local Curator 0.12.8 — Firefox installation
+=================================================
+
+This is a private, Mozilla-signed Firefox extension for locally hiding,
+excluding, keeping, and skipping Nexus Mods results.
+
+Install
+-------
+1. Save NexusLocalCurator-0.12.8-Firefox-Signed.xpi to your computer.
+2. In Firefox, open the menu and choose Add-ons and themes.
+3. Select the gear button, then Install Add-on From File.
+4. Choose the .xpi file and approve Add.
+
+You can also drag the .xpi file onto an open Firefox window.
+
+Privacy
+-------
+The installer contains no API key, author lists, mod decisions, backups,
+diagnostics, or signing credentials. Each installation begins with its own
+local lists. A personal Nexus API key is optional and must be imported by
+that user on their own computer.
+
+Updates
+-------
+This is an unlisted/private build, so Firefox will not fetch public automatic
+updates. Install a newer signed .xpi over the existing extension to update it;
+the fixed extension identity preserves that Firefox profile's local lists.
+
+Sharing a blocklist
+-------------------
+The extension and a blocklist are separate. If the sender also wants to share
+their excluded-author list, they should use Manage > Export public blocklist
+and send that CSV separately. That export excludes hidden authors, kept or
+skipped mods, recovery data, diagnostics, and the API key.

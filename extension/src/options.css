@@ -41,6 +41,7 @@ td:last-child, th:last-child { width: 1%; white-space: nowrap; text-align: right
 a { color: #ef9e3b; }
 .status-pill { display: inline-block; min-width: 4rem; padding: 0.2rem 0.45rem; border-radius: 999px; text-align: center; background: #333; text-transform: capitalize; }
 .status-pill.keep { background: #184a30; color: #a7f3c8; }
+.status-pill.trim { background: #1d3f52; color: #a9dcf5; }
 .status-pill.maybe { background: #5a4317; color: #ffe19b; }
 .status-pill.skip { background: #512424; color: #ffc1c1; }
 .empty { padding: 1.5rem; color: #999; text-align: center; }

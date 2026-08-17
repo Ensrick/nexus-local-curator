@@ -4,8 +4,11 @@
   const Core = globalThis.NexusCuratorCore;
   let state = Core.defaultState();
   let recoverySnapshot = null;
+  let recoveryEntry = null;
   let apiKeyConfigured = false;
-  const MANAGE_VIEWS = new Set(["skip", "hidden", "excluded", "keep", "maybe", "decisions", "all"]);
+  const MANAGE_VIEWS = new Set(["skip", "hidden", "excluded", "keep", "trim", "maybe", "decisions", "all"]);
+  const STATUS_LABELS = { keep: "Keep", trim: "Trimmed", maybe: "Maybe", skip: "Skip" };
+  const STATUS_NOUNS = { skip: "skipped", trim: "trimmed" };
 
   const elements = {
     summary: document.getElementById("summary"),
@@ -42,6 +45,8 @@
     }
     state = normalised;
     await browser.storage.local.set(state);
+    recoveryEntry = null;
+    if (browser.storage.local.remove) await browser.storage.local.remove("recoveryEntry");
     render();
   }
 
@@ -123,7 +128,7 @@
       const statusCell = document.createElement("td");
       const pill = document.createElement("span");
       pill.className = `status-pill ${mod.status}`;
-      pill.textContent = mod.status;
+      pill.textContent = STATUS_LABELS[mod.status] || mod.status;
       statusCell.appendChild(pill);
       const modCell = document.createElement("td");
       if (mod.sourceUrl) {
@@ -142,8 +147,8 @@
     }
   }
 
-  function render() {
-    const counts = { keep: 0, maybe: 0, skip: 0 };
+  function renderMetadata() {
+    const counts = { keep: 0, trim: 0, maybe: 0, skip: 0 };
     state.modDecisions.forEach(item => { counts[item.status] += 1; });
     const selected = elements.manageView.value;
     const showAll = selected === "all";
@@ -155,14 +160,15 @@
       hidden: `Hidden authors (${state.reviewedAuthors.length.toLocaleString()})`,
       excluded: `Excluded authors / blocked (${state.blockedAuthors.length.toLocaleString()})`,
       keep: `Kept mods (${counts.keep.toLocaleString()})`,
+      trim: `Trimmed mods (${counts.trim.toLocaleString()})`,
       maybe: `Maybe mods (${counts.maybe.toLocaleString()})`,
       decisions: `All mod decisions (${state.modDecisions.length.toLocaleString()})`,
       all: "All lists"
     };
     for (const option of elements.manageView.options) option.textContent = optionLabels[option.value];
-    elements.summary.textContent = `${state.blockedAuthors.length} excluded · ${state.reviewedAuthors.length} reviewed · ${counts.keep} keep · ${counts.maybe} maybe · ${counts.skip} skip`;
+    elements.summary.textContent = `${state.blockedAuthors.length} excluded · ${state.reviewedAuthors.length} reviewed · ${counts.keep} keep · ${counts.trim} trim · ${counts.maybe} maybe · ${counts.skip} skip`;
     elements.showPageStatus.checked = state.settings.showPageStatus;
-    elements.restoreSnapshot.disabled = !recoverySnapshot || !recoverySnapshot.state;
+    elements.restoreSnapshot.disabled = !recoveryEntry && (!recoverySnapshot || !recoverySnapshot.state);
     elements.apiKeyStatus.textContent = apiKeyConfigured ? "API key configured" : "API key not configured";
     elements.apiKeyStatus.classList.toggle("configured", apiKeyConfigured);
     elements.openCatalog.disabled = !apiKeyConfigured;
@@ -178,7 +184,13 @@
         ? `${state.reviewedAuthors.length.toLocaleString()} hidden authors whose catalogues were reviewed.`
         : selected === "decisions"
           ? `${state.modDecisions.length.toLocaleString()} saved mod decisions.`
-          : `${counts[selected].toLocaleString()} ${selected === "skip" ? "skipped" : selected} mods.`;
+          : `${counts[selected].toLocaleString()} ${STATUS_NOUNS[selected] || selected} mods.`;
+
+    return { selected, showAll, showExcluded, showHidden };
+  }
+
+  function render() {
+    const { selected, showAll, showExcluded, showHidden } = renderMetadata();
 
     if (showAll) {
       renderAuthors();
@@ -228,14 +240,33 @@
   document.addEventListener("click", async event => {
     const button = event.target.closest("[data-remove-type]");
     if (!button) return;
-    if (button.dataset.removeType === "author") {
-      await persist({ ...state, blockedAuthors: state.blockedAuthors.filter(item => Core.authorKey(item) !== button.dataset.removeKey) });
-    } else if (button.dataset.removeType === "reviewed-author") {
-      await persist({ ...state, reviewedAuthors: state.reviewedAuthors.filter(item => Core.authorKey(item) !== button.dataset.removeKey) });
-    } else {
-      await persist({ ...state, modDecisions: state.modDecisions.filter(item => item.key !== button.dataset.removeKey) });
-    }
+    const entryType = button.dataset.removeType;
+    const entryKey = button.dataset.removeKey;
+    const source = entryType === "author"
+      ? state.blockedAuthors
+      : entryType === "reviewed-author"
+        ? state.reviewedAuthors
+        : state.modDecisions;
+    const entry = source.find(item => entryType === "mod" ? item.key === entryKey : Core.authorKey(item) === entryKey);
+    if (!entry) return;
+
+    if (entryType === "author") state = { ...state, blockedAuthors: source.filter(item => Core.authorKey(item) !== entryKey) };
+    else if (entryType === "reviewed-author") state = { ...state, reviewedAuthors: source.filter(item => Core.authorKey(item) !== entryKey) };
+    else state = { ...state, modDecisions: source.filter(item => item.key !== entryKey) };
+
+    recoveryEntry = { createdAt: new Date().toISOString(), entryType, operation: "restore", entry };
+    recoverySnapshot = null;
+    button.closest("tr").remove();
+    if (entryType === "author" && !elements.authors.children.length) renderAuthors();
+    if (entryType === "reviewed-author" && !elements.reviewedAuthors.children.length) renderReviewedAuthors();
+    if (entryType === "mod" && !elements.mods.children.length) renderMods(elements.manageView.value);
+    renderMetadata();
     setStatus("Entry removed.");
+    browser.runtime.sendMessage({ type: "persist-manage-operation", entryType, operation: "remove", entry })
+      .then(result => {
+        if (!result || !result.ok) throw new Error(result && result.error || "The background save was rejected.");
+      })
+      .catch(error => setStatus(`Entry removed from this view, but could not be saved: ${error.message}`, true));
   });
 
   elements.manageView.addEventListener("change", () => {
@@ -309,6 +340,32 @@
   });
 
   elements.restoreSnapshot.addEventListener("click", async () => {
+    if (recoveryEntry) {
+      const action = recoveryEntry;
+      if (!confirm(`${action.operation === "restore" ? "Restore" : "Remove"} the last changed entry?`)) return;
+      const source = action.entryType === "author"
+        ? state.blockedAuthors
+        : action.entryType === "reviewed-author"
+          ? state.reviewedAuthors
+          : state.modDecisions;
+      const key = action.entryType === "mod" ? action.entry.key : Core.authorKey(action.entry);
+      const without = source.filter(item => (action.entryType === "mod" ? item.key : Core.authorKey(item)) !== key);
+      const next = action.operation === "restore" ? [...without, action.entry] : without;
+      if (action.entryType === "author") state = { ...state, blockedAuthors: next };
+      else if (action.entryType === "reviewed-author") state = { ...state, reviewedAuthors: next };
+      else state = { ...state, modDecisions: next };
+      recoveryEntry = { ...action, createdAt: new Date().toISOString(), operation: action.operation === "restore" ? "remove" : "restore" };
+      render();
+      const result = await browser.runtime.sendMessage({
+        type: "persist-manage-operation",
+        entryType: action.entryType,
+        operation: action.operation,
+        entry: action.entry
+      });
+      if (!result || !result.ok) setStatus(result && result.error || "Could not restore the last entry.", true);
+      else setStatus("Last Manage change restored. Use Restore last change again to undo the restoration.");
+      return;
+    }
     if (!recoverySnapshot || !recoverySnapshot.state) return;
     if (!confirm(`Restore the automatic snapshot from ${new Date(recoverySnapshot.createdAt).toLocaleString()}?`)) return;
     await persist(recoverySnapshot.state);
@@ -335,6 +392,7 @@
   browser.storage.local.get(null).then(items => {
     apiKeyConfigured = Boolean(String(items.nexusApiKey || "").trim());
     recoverySnapshot = items.recoverySnapshot && items.recoverySnapshot.state ? items.recoverySnapshot : null;
+    recoveryEntry = items.recoveryEntry && items.recoveryEntry.entry ? items.recoveryEntry : null;
     state = Core.stateFromStorage(items);
     if (MANAGE_VIEWS.has(items.manageView)) elements.manageView.value = items.manageView;
     const journalKeys = Object.keys(items).filter(key =>

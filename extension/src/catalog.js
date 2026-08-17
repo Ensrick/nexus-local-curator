@@ -9,6 +9,32 @@
   let loading = false;
   let sourcePage = 1;
   let nextSourceCursor = null;
+  let scanPaused = false;
+
+  function runtimeDisconnected(error) {
+    return /Could not establish connection|Receiving end does not exist|Extension context invalidated/i
+      .test(String(error && error.message || error || ""));
+  }
+
+  async function sendRuntimeMessage(message, allowRetry = true) {
+    try {
+      return await browser.runtime.sendMessage(message);
+    } catch (error) {
+      if (!runtimeDisconnected(error) || !allowRetry) {
+        if (runtimeDisconnected(error)) {
+          throw new Error("The extension background is unavailable. Reload this page; if it persists, disable and re-enable Nexus Local Curator in about:addons.");
+        }
+        throw error;
+      }
+      try {
+        if (browser.runtime.getBackgroundPage) await browser.runtime.getBackgroundPage();
+      } catch (_error) {
+        // Retry below provides the final result.
+      }
+      await new Promise(resolve => setTimeout(resolve, 200));
+      return sendRuntimeMessage(message, false);
+    }
+  }
 
   const elements = {
     game: document.getElementById("game-domain"),
@@ -101,6 +127,7 @@
     actions.className = "card-actions";
     actions.append(
       actionButton("Keep", "keep", mod.key),
+      actionButton("Trim", "trim", mod.key),
       actionButton("Skip", "skip", mod.key),
       actionButton("Hide", "hide", mod.key),
       actionButton("Exclude", "exclude", mod.key)
@@ -128,7 +155,11 @@
       ? `${formatNumber(totalCount)} source mods · source page ${sourcePage} · ${mods.length} shown locally`
       : `Source page ${sourcePage} · ${mods.length} shown locally`;
     elements.load.disabled = loading;
-    elements.load.textContent = loading ? "Loading from Nexus…" : "Continue to next source page";
+    elements.load.textContent = loading
+      ? "Checking up to 50 source pages…"
+      : scanPaused
+        ? "Continue scan"
+        : "Continue to next source page";
   }
 
   async function saveRecoverySnapshot(previous) {
@@ -159,7 +190,7 @@
     render();
     setStatus(`Loading Nexus source page ${sourcePage}; your lists will be applied locally…`);
     try {
-      const response = await browser.runtime.sendMessage({
+      const response = await sendRuntimeMessage({
         type: "nexus-api-batch",
         request: {
           mode: "stream",
@@ -174,7 +205,10 @@
       totalCount = response.totalCount;
       sourcePage = Number(response.streamEndPage || sourcePage);
       nextSourceCursor = response.nextCursor || null;
-      setStatus(`Loaded ${mods.length} unreviewed mods from Nexus source page ${sourcePage}. Decisions remain in Manage and your backups.`);
+      scanPaused = Boolean(response.scanPaused);
+      setStatus(scanPaused
+        ? `Checked Nexus source pages ${Number(response.streamStartPage || sourcePage).toLocaleString()}–${sourcePage.toLocaleString()}; none were visible after your local lists. Continue when ready.`
+        : `Loaded ${mods.length} unreviewed mods from Nexus source page ${sourcePage}. Decisions remain in Manage and your backups.`);
     } catch (error) {
       setStatus(error.message, true);
     } finally {
@@ -213,6 +247,7 @@
     totalCount = 0;
     sourcePage = 1;
     nextSourceCursor = null;
+    scanPaused = false;
     render();
     loadBatch();
   });
@@ -221,6 +256,7 @@
     totalCount = 0;
     sourcePage = 1;
     nextSourceCursor = null;
+    scanPaused = false;
     render();
     loadBatch();
   });

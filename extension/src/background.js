@@ -5,6 +5,8 @@ const API_URL = "https://api.nexusmods.com";
 const GRAPHQL_URL = `${API_URL}/v2/graphql`;
 const API_PROTOCOL_VERSION = "1.7.1";
 const REQUEST_TIMEOUT_MS = 15000;
+const MAX_STREAM_SOURCE_PAGES = 50;
+const MAX_STREAM_SCAN_MS = 120000;
 const APP_VERSION = browser.runtime.getManifest().version;
 const AUTHOR_DECISION_PREFIX = "nlcAuthorDecision:";
 const MOD_DECISION_PREFIX = "nlcModDecision:";
@@ -16,6 +18,9 @@ let performanceDiagnostics = [];
 let performanceDiagnosticsTimer = null;
 const activeBatchJobs = new Map();
 let batchJobSequence = 0;
+let pendingManageOperations = [];
+let managePersistenceTimer = null;
+let managePersistenceInFlight = false;
 const MODS_QUERY = `query mods(
   $viewUploaderHidden: Boolean,
   $viewUserBlockedContent: Boolean,
@@ -307,6 +312,8 @@ async function fetchCuratedBatch(request, sender) {
   const collected = [];
   let lastResponse = null;
   let pageCount = 0;
+  let scannedSourcePages = 0;
+  const scanStartedAt = performance.now();
   const jobKey = batchJobKey(sender);
   const jobToken = ++batchJobSequence;
   activeBatchJobs.set(jobKey, jobToken);
@@ -317,6 +324,7 @@ async function fetchCuratedBatch(request, sender) {
       const response = await fetchCuratedMods({ ...request, mode: "stream", page: sourcePage }, apiKey);
       if (!response || !response.ok) return response || { ok: false, error: "Nexus returned no catalogue data." };
       lastResponse = response;
+      scannedSourcePages += 1;
       pageCount = response.totalCount ? Math.ceil(Number(response.totalCount) / ApiCore.API_BATCH_SIZE) : 0;
       if (pageCount && sourcePage > pageCount) {
         sourcePage = pageCount;
@@ -359,7 +367,19 @@ async function fetchCuratedBatch(request, sender) {
           nextCursor: null
         };
       }
-      sourcePage += 1;
+      const nextPage = sourcePage + 1;
+      if (scannedSourcePages >= MAX_STREAM_SOURCE_PAGES || performance.now() - scanStartedAt >= MAX_STREAM_SCAN_MS) {
+        return {
+          ...lastResponse,
+          nodes: [],
+          streamStartPage: startPage,
+          streamEndPage: sourcePage,
+          scannedSourcePages,
+          scanPaused: true,
+          nextCursor: { page: nextPage, index: 0, batch: batchNumber + 1 }
+        };
+      }
+      sourcePage = nextPage;
       sourceIndex = 0;
     }
   } finally {
@@ -582,17 +602,88 @@ function persistStreamCursor(message) {
   return cursorPersistenceTail.then(() => ({ ok: true }), error => ({ ok: false, error: error.message }));
 }
 
-browser.action.onClicked.addListener(openCatalog);
+function authorEntryKey(author) {
+  const userId = String(author && author.userId || "").trim();
+  if (userId) return `id:${userId}`;
+  return `name:${String(author && author.username || "").trim().toLocaleLowerCase()}`;
+}
 
-browser.tabs.onRemoved.addListener(tabId => {
-  activeBatchJobs.delete(`tab:${tabId}`);
-});
+function modEntryKey(mod) {
+  if (mod && mod.key) return String(mod.key);
+  return `${String(mod && mod.game || "unknown").trim().toLocaleLowerCase()}:${String(mod && mod.modId || "").trim()}`;
+}
 
-browser.runtime.onMessage.addListener((message, sender) => {
+function manageEntryKey(type, entry) {
+  return type === "mod" ? modEntryKey(entry) : authorEntryKey(entry);
+}
+
+function queueManageOperation(message) {
+  const type = String(message && message.entryType || "");
+  const operation = String(message && message.operation || "");
+  const entry = message && message.entry;
+  if (!["author", "reviewed-author", "mod"].includes(type) || !["remove", "restore"].includes(operation) || !entry || typeof entry !== "object") {
+    return { ok: false, error: "Invalid Manage operation." };
+  }
+  const key = manageEntryKey(type, entry);
+  if (!key || key.endsWith(":")) return { ok: false, error: "Invalid saved entry." };
+  pendingManageOperations.push({ type, operation, entry, key });
+  if (!managePersistenceTimer && !managePersistenceInFlight) managePersistenceTimer = setTimeout(flushManageOperations, 250);
+  return { ok: true, queued: true };
+}
+
+async function flushManageOperations() {
+  managePersistenceTimer = null;
+  managePersistenceInFlight = true;
+  const operations = pendingManageOperations;
+  pendingManageOperations = [];
+  if (!operations.length) {
+    managePersistenceInFlight = false;
+    return;
+  }
+  try {
+    const stored = await browser.storage.local.get(["blockedAuthors", "reviewedAuthors", "modDecisions"]);
+    const lists = {
+      author: Array.isArray(stored.blockedAuthors) ? stored.blockedAuthors : [],
+      "reviewed-author": Array.isArray(stored.reviewedAuthors) ? stored.reviewedAuthors : [],
+      mod: Array.isArray(stored.modDecisions) ? stored.modDecisions : []
+    };
+    const changed = new Set();
+    let recoveryEntry = null;
+    for (const item of operations) {
+      const list = lists[item.type];
+      const index = list.findIndex(entry => manageEntryKey(item.type, entry) === item.key);
+      if (item.operation === "remove" && index >= 0) list.splice(index, 1);
+      if (item.operation === "restore" && index < 0) list.push(item.entry);
+      changed.add(item.type);
+      recoveryEntry = {
+        createdAt: new Date().toISOString(),
+        entryType: item.type,
+        operation: item.operation === "remove" ? "restore" : "remove",
+        entry: item.entry
+      };
+    }
+    const update = { recoveryEntry };
+    if (changed.has("author")) update.blockedAuthors = lists.author;
+    if (changed.has("reviewed-author")) update.reviewedAuthors = lists["reviewed-author"];
+    if (changed.has("mod")) update.modDecisions = lists.mod;
+    await browser.storage.local.set(update);
+  } catch (error) {
+    pendingManageOperations = [...operations, ...pendingManageOperations];
+    console.error("Nexus Local Curator could not save Manage removals", error);
+  } finally {
+    managePersistenceInFlight = false;
+    if (pendingManageOperations.length && !managePersistenceTimer) {
+      managePersistenceTimer = setTimeout(flushManageOperations, 250);
+    }
+  }
+}
+
+function handleRuntimeMessage(message, sender) {
   if (message && message.type === "open-options") return browser.runtime.openOptionsPage();
   if (message && message.type === "open-catalog") return openCatalog();
   if (message && message.type === "persist-local-delta") return persistLocalDelta(message);
   if (message && message.type === "persist-stream-cursor") return persistStreamCursor(message);
+  if (message && message.type === "persist-manage-operation") return queueManageOperation(message);
   if (message && message.type === "record-performance-diagnostic") return recordPerformanceDiagnostic(message.value);
   if (message && message.type === "nexus-api-validate-key") return validateApiKey(message.apiKey);
   if (message && message.type === "nexus-api-batch") return fetchCuratedBatch(message.request, sender);
@@ -601,4 +692,15 @@ browser.runtime.onMessage.addListener((message, sender) => {
   if (message && message.type === "nexus-api-language-counts") return fetchLanguageCounts(message.request);
   if (message && message.type === "nexus-api-category-counts") return fetchCategoryCounts(message.request);
   return undefined;
-});
+}
+
+// Register the core message listener first so an unrelated optional event hook
+// can never leave extension pages without a receiving background handler.
+browser.runtime.onMessage.addListener(handleRuntimeMessage);
+browser.action.onClicked.addListener(openCatalog);
+
+if (browser.tabs && browser.tabs.onRemoved) {
+  browser.tabs.onRemoved.addListener(tabId => {
+    activeBatchJobs.delete(`tab:${tabId}`);
+  });
+}

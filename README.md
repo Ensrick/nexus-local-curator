@@ -6,26 +6,26 @@ Normal Nexus-page filtering does not require an API key. The review stream uses 
 
 ## Features
 
-- State-aware **Exclude/Include**, **Hide/Unhide**, and **Keep/Unkeep** toggles directly on Nexus mod cards.
+- State-aware **Exclude/Include**, **Hide/Unhide**, **Keep/Unkeep**, and **Trim/Untrim** toggles directly on Nexus mod cards.
 - Stable matching by Nexus user ID when the page exposes it, with a case-insensitive username fallback.
-- Per-mod **Keep** shortlist and **Skip** decisions. Older **Maybe** decisions remain preserved and manageable.
+- Per-mod **Keep** shortlist, **Trim** shortlist for mods worth keeping only in part, and **Skip** decisions. Older **Maybe** decisions remain preserved and manageable.
 - Two separate author filters: **Reviewed authors** for catalogs you have already checked and **Excluded authors** for creators you want nothing from.
 - Immediate filtering of current and dynamically loaded cards.
 - A persistent, lightweight review stream that never sends the full author blacklist to Nexus.
 - Every filter or category visit checks page 1 for newly uploaded mods; **Resume backlog** returns to the saved older-work checkpoint.
 - Recent **Previous** batch history is saved with each backlog checkpoint and survives Firefox restarts.
-- Completely filtered source pages are skipped in the background; the first source page containing any visible mods is returned immediately, even when fewer than 80 remain.
+- Completely filtered source pages are skipped in bounded groups of at most fifty; an empty group pauses with its checked page range and a resumable cursor instead of chaining indefinitely.
 - Requests remain one-at-a-time, stop at the first nonempty result, and never prefetch.
 - Exclude and Hide use constant-time in-memory indexes, stable card controls, and batched background storage writes to keep clicks responsive with thousands of saved authors.
 - Raw Nexus language/category suffixes are hidden because they do not reflect local author decisions.
 - Temporary **Show Hidden**, **Show Blocked**, and **Show Skipped** controls that never alter saved decisions.
 - A prominent **Show skipped mods** view in **Manage**, with direct links and removal controls for correcting skips.
-- A count-labelled **Manage saved lists** menu for viewing skipped/kept mods, hidden authors, excluded authors, or every list without rendering thousands of unrelated rows.
+- A count-labelled **Manage saved lists** menu for viewing skipped/kept/trimmed mods, hidden authors, excluded authors, or every list without rendering thousands of unrelated rows.
 - Automatic Nexus-tab recovery after an extension update, with a short background-message retry before reloading an orphaned tab.
 - A read-only **Local status** column on the Nexus Tracking Centre showing **Blocked**, **Hidden**, or **Good** for each mod author.
 - Author profile catalogues remain visible even for excluded or hidden authors; only individually skipped mods are removed there.
 - Normal grid reflow with no empty card-sized gaps.
-- Separate counts for hidden authors/mods, excluded authors/mods, skipped mods, and kept candidates.
+- Separate counts for hidden authors/mods, excluded authors/mods, skipped mods, kept candidates, and trimmed candidates.
 - CSV export/import for long-lived curation data.
 - JSON full backup.
 - Automatic last-change recovery snapshot with one-click restoration.
@@ -101,7 +101,7 @@ With an API key configured, the extension replaces the listing with the first Ne
 
 ## API key
 
-The normal page filter needs no API key. The review stream requires a personal Nexus API key. Import the key's text file in **Manage**; the key remains in Firefox's extension storage and is excluded from CSV/JSON exports. Each request returns at most one 80-mod Nexus source page. Requests run sequentially, stop at the first page with visible content, and never prefetch the next page. Nexus's current API limits and acceptable-use rules still apply.
+The normal page filter needs no API key. The review stream requires a personal Nexus API key. Import the key's text file in **Manage**; the key remains in Firefox's extension storage and is excluded from CSV/JSON exports. The 80-result Nexus option remains supported. Requests run sequentially, stop at the first page with visible content, and pause after at most fifty empty source pages or two minutes. Nexus's current API limits and acceptable-use rules still apply.
 
 ## Privacy
 

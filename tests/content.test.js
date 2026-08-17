@@ -71,7 +71,7 @@ test("content script hides blocked authors, reflows cards, and adds live control
   assert.equal(tiles[1].querySelector('[data-e2eid="user-link"]').hostname, "www.nexusmods.com");
   assert.equal(tiles[1].querySelector('[data-e2eid="user-link"]').pathname, "/profile/Bob/mods");
   assert.equal(new URL(tiles[1].querySelector('[data-e2eid="user-link"]').href).searchParams.get("gameId"), "1704");
-  assert.equal(tiles[1].querySelectorAll(".nlc-controls button").length, 4);
+  assert.equal(tiles[1].querySelectorAll(".nlc-controls button").length, 5);
   assert.match(dom.window.document.querySelector(".nlc-result-summary").textContent, /2 loaded · 1 hidden locally/);
   assert.match(dom.window.document.querySelector("#nlc-page-status").textContent, /1 shown · 0 hidden authors · 1 excluded authors/);
   assert.equal(dom.window.document.querySelector('[data-nlc-action="toggle-skipped"]').textContent, "Show Skipped");
@@ -195,6 +195,73 @@ test("author catalogues ignore author-level filters but still hide individually 
   unkeep.click();
   await new Promise(resolve => setTimeout(resolve, 320));
   assert.equal(tiles[0].querySelector('[data-nlc-action="keep"]').textContent, "Keep");
+});
+
+test("Trim keeps a mod visible, toggles like Keep, and is counted separately", async t => {
+  const dom = new JSDOM(`<!doctype html><body>
+    <div data-e2eid="result-count">3 results</div>
+    <div class="mods-grid">${tile(20, "Alice", 10)}${tile(21, "Bob", 20)}${tile(22, "Carol", 30)}</div>
+  </body>`, {
+    url: "https://www.nexusmods.com/games/skyrimspecialedition/mods",
+    runScripts: "outside-only"
+  });
+  t.after(() => dom.window.close());
+
+  const stored = {
+    schemaVersion: 4,
+    blockedAuthors: [],
+    reviewedAuthors: [],
+    modDecisions: [
+      { game: "skyrimspecialedition", modId: "21", title: "Mod 21", author: "Bob", status: "trim" },
+      { game: "skyrimspecialedition", modId: "22", title: "Mod 22", author: "Carol", status: "skip" }
+    ],
+    settings: { showPageStatus: true }
+  };
+  const persisted = [];
+  dom.window.browser = {
+    storage: {
+      local: {
+        get: async () => structuredClone(stored),
+        set: async value => Object.assign(stored, structuredClone(value)),
+        clear: async () => {}
+      },
+      onChanged: { addListener: () => {} }
+    },
+    runtime: {
+      sendMessage: async message => {
+        if (message && message.type === "persist-local-delta") persisted.push(structuredClone(message));
+        return { ok: true };
+      }
+    }
+  };
+
+  dom.window.eval(sharedSource);
+  dom.window.eval(contentSource);
+  await new Promise(resolve => setTimeout(resolve, 150));
+
+  const tiles = dom.window.document.querySelectorAll('[data-e2eid="mod-tile"]');
+  assert.equal(tiles[1].classList.contains("nlc-hidden"), false, "a trimmed mod stays visible like a kept mod");
+  assert.equal(tiles[2].classList.contains("nlc-hidden"), true, "a skipped mod stays hidden");
+  assert.match(dom.window.document.querySelector("#nlc-page-status").textContent, /1 trimmed/);
+
+  const actions = Array.from(tiles[0].querySelectorAll(".nlc-controls button"))
+    .map(button => button.dataset.nlcAction);
+  assert.deepEqual(actions.slice(0, 3), ["keep", "trim", "skip"]);
+
+  assert.equal(tiles[1].querySelector('[data-nlc-action="untrim"]').textContent, "Untrim");
+  assert.equal(tiles[1].querySelector('[data-nlc-action="untrim"]').getAttribute("aria-pressed"), "true");
+
+  tiles[0].querySelector('[data-nlc-action="trim"]').click();
+  await new Promise(resolve => setTimeout(resolve, 320));
+  const untrim = tiles[0].querySelector('[data-nlc-action="untrim"]');
+  assert.equal(untrim.textContent, "Untrim");
+  assert.equal(persisted.at(-1).value.mod.status, "trim");
+  assert.match(dom.window.document.querySelector("#nlc-page-status").textContent, /2 trimmed/);
+
+  untrim.click();
+  await new Promise(resolve => setTimeout(resolve, 320));
+  assert.equal(tiles[0].querySelector('[data-nlc-action="trim"]').textContent, "Trim");
+  assert.equal(persisted.at(-1).value.status, "unreviewed");
 });
 
 test("adds Blocked, Hidden, and Good statuses to the Tracking Centre author table", async t => {
@@ -700,4 +767,63 @@ test("review stream automatically skips source pages that are already empty loca
   assert.deepEqual(sourcePages, [1]);
   assert.match(dom.window.document.querySelector('[data-nlc-api-tile="true"]').textContent, /Visible candidate/);
   assert.equal(dom.window.document.body.textContent.includes("Continue to next source page"), false);
+});
+
+test("a bounded empty scan pauses instead of automatically chaining forever", async t => {
+  const dom = new JSDOM(`<!doctype html><body>
+    <div data-e2eid="result-count">136,000 results</div>
+    <div class="mods-grid">${tile(1, "NativeAuthor", 1)}</div>
+  </body>`, {
+    url: "https://www.nexusmods.com/games/skyrimspecialedition/mods?sort=createdAt",
+    runScripts: "outside-only"
+  });
+  t.after(() => dom.window.close());
+
+  const stored = {
+    schemaVersion: 4,
+    nexusApiKey: "configured",
+    blockedAuthors: [{ username: "BlockedAuthor", userId: "999" }],
+    reviewedAuthors: [],
+    modDecisions: [],
+    settings: { showPageStatus: true }
+  };
+  let batchRequests = 0;
+  dom.window.browser = {
+    storage: {
+      local: {
+        get: async () => structuredClone(stored),
+        set: async value => Object.assign(stored, structuredClone(value)),
+        clear: async () => {}
+      },
+      onChanged: { addListener: () => {} }
+    },
+    runtime: {
+      getManifest: () => ({ version: "test" }),
+      sendMessage: async message => {
+        if (message.type === "persist-stream-cursor" || message.type === "record-performance-diagnostic") return { ok: true };
+        if (message.type !== "nexus-api-batch") return {};
+        batchRequests += 1;
+        return {
+          ok: true,
+          totalCount: 136000,
+          nodes: [],
+          streamStartPage: 1,
+          streamEndPage: 50,
+          scanPaused: true,
+          nextCursor: { page: 51, index: 0, batch: 2 }
+        };
+      }
+    }
+  };
+
+  dom.window.eval(apiCoreSource);
+  dom.window.eval(sharedSource);
+  dom.window.eval(contentSource);
+  await new Promise(resolve => setTimeout(resolve, 1500));
+
+  assert.equal(batchRequests, 1);
+  assert.match(dom.window.document.querySelector(".nlc-api-empty").textContent, /source pages 1–50/);
+  assert.equal(dom.window.document.querySelector('[data-nlc-action="curated-next"]').disabled, false);
+  await new Promise(resolve => setTimeout(resolve, 500));
+  assert.equal(batchRequests, 1);
 });

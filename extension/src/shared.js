@@ -2,7 +2,7 @@
   "use strict";
 
   const SCHEMA_VERSION = 4;
-  const VALID_STATUSES = new Set(["keep", "maybe", "skip"]);
+  const VALID_STATUSES = new Set(["keep", "trim", "maybe", "skip"]);
   const AUTHOR_DECISION_PREFIX = "nlcAuthorDecision:";
   const MOD_DECISION_PREFIX = "nlcModDecision:";
 

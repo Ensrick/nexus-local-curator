@@ -141,6 +141,47 @@ test("CSV export and import preserve quoted values and decisions", () => {
   assert.equal(restored.reviewedAuthors[0].username, "ReviewedAuthor");
 });
 
+test("trim is a saved status of its own and survives CSV and JSON round trips", () => {
+  const mod = {
+    game: "skyrimspecialedition",
+    modId: "77",
+    title: "Partly Useful Mod",
+    author: { username: "Author" },
+    sourceUrl: "https://www.nexusmods.com/skyrimspecialedition/mods/77"
+  };
+  assert.equal(Core.VALID_STATUSES.has("trim"), true);
+  const state = Core.setDecision(Core.defaultState(), mod, "trim");
+  assert.equal(Core.decisionFor(state, mod).status, "trim");
+
+  const fromCsv = Core.csvToState(Core.stateToCsv(state));
+  assert.equal(Core.decisionFor(fromCsv, mod).status, "trim");
+  assert.equal(Core.decisionFor(fromCsv, mod).title, "Partly Useful Mod");
+
+  const fromJson = Core.normaliseState(JSON.parse(JSON.stringify(state)));
+  assert.equal(Core.decisionFor(fromJson, mod).status, "trim");
+});
+
+test("trim journal rows replay without being coerced to another status", () => {
+  const trimmed = { game: "skyrimspecialedition", modId: "78", status: "trim", title: "Trimmed Mod" };
+  const state = Core.stateFromStorage({
+    schemaVersion: Core.SCHEMA_VERSION,
+    blockedAuthors: [],
+    reviewedAuthors: [],
+    modDecisions: [],
+    [Core.modDecisionStorageKey(trimmed)]: { kind: "mod", status: "reviewed", mod: trimmed }
+  });
+  assert.equal(Core.decisionFor(state, trimmed).status, "trim");
+
+  const cleared = Core.stateFromStorage({
+    schemaVersion: Core.SCHEMA_VERSION,
+    blockedAuthors: [],
+    reviewedAuthors: [],
+    modDecisions: [trimmed],
+    [Core.modDecisionStorageKey(trimmed)]: { kind: "mod", status: "unreviewed", mod: trimmed }
+  });
+  assert.equal(Core.decisionFor(cleared, trimmed), undefined);
+});
+
 test("public blocklist export cannot contain private lists, decisions, or API keys", () => {
   const csv = Core.publicBlocklistCsv({
     nexusApiKey: "DO-NOT-EXPORT-THIS-KEY",

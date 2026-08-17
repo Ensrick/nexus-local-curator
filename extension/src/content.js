@@ -78,6 +78,11 @@
         contextIsCurrent = false;
       }
       if (contextIsCurrent && allowRetry) {
+        try {
+          if (browser.runtime.getBackgroundPage) await browser.runtime.getBackgroundPage();
+        } catch (_error) {
+          // The follow-up message remains the authoritative recovery check.
+        }
         await new Promise(resolve => setTimeout(resolve, 150));
         return sendRuntimeMessage(message, false);
       }
@@ -241,15 +246,18 @@
       tile.appendChild(controls);
       const keep = createButton("Keep", "keep", decision && decision.status === "keep", "Keep this mod as a candidate");
       keep.classList.add("nlc-keep-mod");
+      const trim = createButton("Trim", "trim", decision && decision.status === "trim", "Keep only part of this mod; it needs trimming later");
+      trim.classList.add("nlc-trim-mod");
       const skip = createButton("Skip", "skip", decision && decision.status === "skip", "Hide this individual mod");
       skip.classList.add("nlc-skip-mod");
       const review = createButton("", "", false);
       review.classList.add("nlc-review-author");
       const block = createButton("", "", false);
       block.classList.add("nlc-block-author");
-      controls.append(keep, skip, review, block);
+      controls.append(keep, trim, skip, review, block);
     }
     const keep = controls.querySelector(".nlc-keep-mod");
+    const trim = controls.querySelector(".nlc-trim-mod");
     const skip = controls.querySelector(".nlc-skip-mod");
     const review = controls.querySelector(".nlc-review-author");
     const block = controls.querySelector(".nlc-block-author");
@@ -259,6 +267,15 @@
       keep.dataset.nlcAction = kept ? "unkeep" : "keep";
       keep.setAttribute("aria-pressed", kept ? "true" : "false");
       keep.title = kept ? "Remove this mod from your Keep shortlist" : "Keep this mod as a candidate";
+    }
+    if (trim) {
+      const trimmed = decision && decision.status === "trim";
+      trim.textContent = trimmed ? "Untrim" : "Trim";
+      trim.dataset.nlcAction = trimmed ? "untrim" : "trim";
+      trim.setAttribute("aria-pressed", trimmed ? "true" : "false");
+      trim.title = trimmed
+        ? "Remove this mod from your Trim shortlist"
+        : "Keep only part of this mod; it needs trimming later";
     }
     if (skip) {
       const skipped = decision && decision.status === "skip";
@@ -347,7 +364,8 @@
     badge.querySelector(".nlc-status-text").textContent =
       `${shown.toLocaleString()} shown · ${state.reviewedAuthors.length.toLocaleString()} hidden authors` +
       ` · ${state.blockedAuthors.length.toLocaleString()} excluded authors` +
-      ` · ${decisionCount("skip").toLocaleString()} skipped mods · ${decisionCount("keep").toLocaleString()} kept${pageText}` +
+      ` · ${decisionCount("skip").toLocaleString()} skipped mods · ${decisionCount("keep").toLocaleString()} kept` +
+      ` · ${decisionCount("trim").toLocaleString()} trimmed${pageText}` +
       (curatedLoading ? " · loading filtered catalogue" : "") +
       (curatedError ? ` · ${curatedError}` : "");
   }
@@ -921,7 +939,9 @@
       empty.className = "nlc-api-empty";
       empty.dataset.nlcOwned = "true";
       const message = document.createElement("span");
-      message.textContent = "No unreviewed mods remain for the selected filters.";
+      message.textContent = response.scanPaused
+        ? `No visible mods in source pages ${Number(response.streamStartPage || curatedPage).toLocaleString()}–${Number(response.streamEndPage || curatedPage).toLocaleString()}. Choose Next batch to continue.`
+        : "No unreviewed mods remain for the selected filters.";
       empty.appendChild(message);
       nextDisplay.appendChild(empty);
     }
@@ -959,7 +979,8 @@
         hiddenAuthors: state.reviewedAuthors.length,
         excludedAuthors: state.blockedAuthors.length,
         skippedMods: decisionCount("skip"),
-        keptMods: decisionCount("keep")
+        keptMods: decisionCount("keep"),
+        trimmedMods: decisionCount("trim")
       },
       response: response && response.ok ? {
         returnedMods: Array.isArray(response.nodes) ? response.nodes.length : 0,
@@ -1261,7 +1282,7 @@
   }
 
   function advanceStreamAfterExhaustion() {
-    if (streamAdvanceScheduled || curatedLoading || !currentBatchNextCursor) return;
+    if (streamAdvanceScheduled || curatedLoading || !currentBatchNextCursor || currentSourceResponse && currentSourceResponse.scanPaused) return;
     streamAdvanceScheduled = true;
     setTimeout(() => {
       streamAdvanceScheduled = false;
@@ -1524,7 +1545,7 @@
       enqueuePersistence(Core.authorDecisionStorageKey(author), { kind: "author", status: "included", author });
       scheduleApply(0);
       reportActionPerformance(action, actionStartedAt, updateStartedAt, updateStartedAt);
-    } else if (action === "unkeep" || action === "unskip") {
+    } else if (action === "unkeep" || action === "untrim" || action === "unskip") {
       const updateStartedAt = performance.now();
       const next = Core.clearDecision(state, mod);
       saveState(next);

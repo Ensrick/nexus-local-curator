@@ -1333,6 +1333,7 @@
       };
       updatePageStatus(tiles.length, counts);
       updateInlineResultSummary(tiles.length, hidden);
+      reportVisiblePageToRelay(tiles);
       updateLoadingIndicator();
       hideFacetSuffixes();
       const emptyCuratedPage = document.body.classList.contains("nlc-curated-active") && tiles.length > 0 && hidden === tiles.length;
@@ -1343,6 +1344,36 @@
       const durationMs = performance.now() - startedAt;
       if (durationMs >= 25) reportPerformanceDiagnostic({ phase: "card-recount", durationMs, tileCount });
     }
+  }
+
+  let relayReportTimer = null;
+  let lastRelayReportSignature = "";
+
+  function reportVisiblePageToRelay(tiles) {
+    if (relayReportTimer) clearTimeout(relayReportTimer);
+    relayReportTimer = setTimeout(() => {
+      relayReportTimer = null;
+      const mods = [];
+      for (const tile of tiles) {
+        if (tile.classList.contains("nlc-hidden")) continue;
+        const mod = Core.readModTile(tile);
+        if (!mod) continue;
+        const decision = Core.decisionFor(state, mod);
+        mods.push({
+          game: mod.game,
+          modId: mod.modId,
+          title: mod.title,
+          sourceUrl: mod.sourceUrl,
+          author: { username: mod.author.username, userId: mod.author.userId },
+          decision: decision ? decision.status : ""
+        });
+      }
+      if (!mods.length) return;
+      const signature = location.href + "|" + mods.map(m => `${m.modId}:${m.decision}`).join(",");
+      if (signature === lastRelayReportSignature) return;
+      lastRelayReportSignature = signature;
+      sendRuntimeMessage({ type: "relay-page-report", url: location.href, mods }).catch(() => {});
+    }, 400);
   }
 
   function scheduleApply(delay = 60) {

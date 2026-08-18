@@ -678,8 +678,79 @@ async function flushManageOperations() {
   }
 }
 
+// --- Curation relay: local assistant bridge (127.0.0.1 only) ---------------
+// Background fetch works because the manifest CSP override omits
+// upgrade-insecure-requests; the page CSP blocks the content-script route.
+// A page report arms decision polling; polling disarms after 30 idle minutes.
+const RELAY_BASE = "http://127.0.0.1:38492";
+const RELAY_POLL_MS = 3000;
+const RELAY_IDLE_CUTOFF_MS = 30 * 60 * 1000;
+const RELAY_VALID_DECISIONS = new Set(["keep", "trim", "skip", "unreviewed"]);
+let relayBackoffUntil = 0;
+let relayPollTimer = null;
+let relayLastActivity = 0;
+
+async function relayFetch(path, options) {
+  if (Date.now() < relayBackoffUntil) return null;
+  try {
+    const response = await fetch(RELAY_BASE + path, options);
+    return response.ok ? response : null;
+  } catch (_error) {
+    relayBackoffUntil = Date.now() + 15000;
+    return null;
+  }
+}
+
+async function pollRelayDecisions() {
+  const response = await relayFetch("/decisions", { method: "GET" });
+  if (!response) return;
+  let decisions;
+  try { decisions = await response.json(); } catch (_error) { return; }
+  if (!Array.isArray(decisions)) return;
+  for (const decision of decisions) {
+    const mod = decision && decision.mod;
+    const status = String(decision && decision.status || "");
+    if (!mod || !mod.modId || !RELAY_VALID_DECISIONS.has(status)) continue;
+    const game = String(mod.game || "skyrimspecialedition").trim().toLocaleLowerCase();
+    const key = "nlcModDecision:" + encodeURIComponent(`${game}:${String(mod.modId).trim()}`);
+    const payload = { ...mod, game };
+    await persistLocalDelta({
+      key,
+      value: status === "unreviewed"
+        ? { status: "unreviewed", mod: payload, sourceId: "curation-relay" }
+        : { status: "reviewed", mod: { ...payload, status }, sourceId: "curation-relay" }
+    });
+  }
+}
+
+function armRelayPolling() {
+  relayLastActivity = Date.now();
+  if (relayPollTimer) return;
+  const tick = async () => {
+    relayPollTimer = null;
+    if (Date.now() - relayLastActivity > RELAY_IDLE_CUTOFF_MS) return;
+    try { await pollRelayDecisions(); } catch (_error) {}
+    relayPollTimer = setTimeout(tick, RELAY_POLL_MS);
+  };
+  relayPollTimer = setTimeout(tick, 500);
+}
+
+function reportPageToRelay(message) {
+  armRelayPolling();
+  return relayFetch("/page", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      url: String(message.url || ""),
+      mods: Array.isArray(message.mods) ? message.mods : [],
+      reportedAt: new Date().toISOString()
+    })
+  }).then(response => ({ ok: Boolean(response) }));
+}
+
 function handleRuntimeMessage(message, sender) {
   if (message && message.type === "open-options") return browser.runtime.openOptionsPage();
+  if (message && message.type === "relay-page-report") return reportPageToRelay(message);
   if (message && message.type === "open-catalog") return openCatalog();
   if (message && message.type === "persist-local-delta") return persistLocalDelta(message);
   if (message && message.type === "persist-stream-cursor") return persistStreamCursor(message);

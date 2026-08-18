@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Nexus Local Curator",
-  "version": "0.14.1",
+  "version": "0.14.2",
   "description": "Hide Nexus Mods authors locally and browse an API-powered catalogue containing only unreviewed results.",
   "permissions": [
     "storage"
   ],
   "host_permissions": [
     "https://www.nexusmods.com/*",
-    "https://api.nexusmods.com/*"
+    "https://api.nexusmods.com/*",
+    "http://127.0.0.1/*"
   ],
   "background": {
     "scripts": [
@@ -65,5 +66,8 @@
       },
       "strict_min_version": "142.0"
     }
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'"
   }
 }

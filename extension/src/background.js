@@ -724,6 +724,10 @@ function armRelayPolling() {
 
 async function applyRelayDecisionList(decisions) {
   if (!Array.isArray(decisions)) return;
+  // Queue every delta before awaiting: persistLocalDelta resolves on the shared
+  // flush timer, so awaiting each entry serializes a large batch into one flush
+  // per decision (a second apiece) instead of one flush for the whole batch.
+  const writes = [];
   for (const decision of decisions) {
     const mod = decision && decision.mod;
     const status = String(decision && decision.status || "");
@@ -731,13 +735,14 @@ async function applyRelayDecisionList(decisions) {
     const game = String(mod.game || "skyrimspecialedition").trim().toLocaleLowerCase();
     const key = "nlcModDecision:" + encodeURIComponent(`${game}:${String(mod.modId).trim()}`);
     const payload = { ...mod, game };
-    await persistLocalDelta({
+    writes.push(persistLocalDelta({
       key,
       value: status === "unreviewed"
         ? { status: "unreviewed", mod: payload, sourceId: "curation-relay" }
         : { status: "reviewed", mod: { ...payload, status }, sourceId: "curation-relay" }
-    });
+    }));
   }
+  await Promise.all(writes);
 }
 
 async function reportPageToRelay(message) {

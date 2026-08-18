@@ -1346,8 +1346,50 @@
     }
   }
 
+  // --- Curation relay (127.0.0.1 assistant bridge). Loopback is exempt from
+  // mixed-content rules, and the relay answers CORS, so the content script can
+  // talk to it directly. Decision polling arms only after a successful page
+  // report and disarms after 30 idle minutes, so no timer runs outside an
+  // active curation session (or in tests, where the relay is absent).
+  const RELAY_BASE = "http://127.0.0.1:38492";
+  const RELAY_POLL_MS = 3000;
+  const RELAY_IDLE_CUTOFF_MS = 30 * 60 * 1000;
+  const RELAY_VALID_DECISIONS = new Set(["keep", "trim", "skip", "unreviewed"]);
   let relayReportTimer = null;
   let lastRelayReportSignature = "";
+  let relayPollTimer = null;
+  let relayLastActivity = 0;
+
+  async function applyRelayDecisions(decisions) {
+    for (const decision of Array.isArray(decisions) ? decisions : []) {
+      const mod = decision && decision.mod;
+      const status = String(decision && decision.status || "");
+      if (!mod || !mod.modId || !RELAY_VALID_DECISIONS.has(status)) continue;
+      const game = String(mod.game || "skyrimspecialedition").trim().toLocaleLowerCase();
+      const payload = { ...mod, game };
+      const key = Core.modDecisionStorageKey(payload);
+      enqueuePersistence(key, status === "unreviewed"
+        ? { status: "unreviewed", mod: payload }
+        : { status: "reviewed", mod: { ...payload, status } });
+    }
+  }
+
+  function armRelayPolling() {
+    relayLastActivity = Date.now();
+    if (relayPollTimer) return;
+    const tick = async () => {
+      relayPollTimer = null;
+      if (Date.now() - relayLastActivity > RELAY_IDLE_CUTOFF_MS) return;
+      try {
+        const response = await fetch(RELAY_BASE + "/decisions");
+        if (response.ok) await applyRelayDecisions(await response.json());
+      } catch (_error) {
+        return; // relay went away; next successful page report re-arms
+      }
+      relayPollTimer = setTimeout(tick, RELAY_POLL_MS);
+    };
+    relayPollTimer = setTimeout(tick, 1000);
+  }
 
   function reportVisiblePageToRelay(tiles) {
     if (relayReportTimer) clearTimeout(relayReportTimer);
@@ -1371,8 +1413,15 @@
       if (!mods.length) return;
       const signature = location.href + "|" + mods.map(m => `${m.modId}:${m.decision}`).join(",");
       if (signature === lastRelayReportSignature) return;
-      lastRelayReportSignature = signature;
-      sendRuntimeMessage({ type: "relay-page-report", url: location.href, mods }).catch(() => {});
+      fetch(RELAY_BASE + "/page", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: location.href, mods, reportedAt: new Date().toISOString() })
+      }).then(response => {
+        if (!response.ok) return;
+        lastRelayReportSignature = signature;
+        armRelayPolling();
+      }).catch(() => {});
     }, 400);
   }
 

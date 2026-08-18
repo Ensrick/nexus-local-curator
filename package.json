@@ -1,6 +1,6 @@
 {
   "name": "nexus-local-curator",
-  "version": "0.14.3",
+  "version": "0.14.4",
   "private": true,
   "description": "A Firefox-first author filter and API-powered curated catalogue for Nexus Mods.",
   "engines": {

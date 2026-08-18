@@ -16,6 +16,20 @@ os.makedirs(SPOOL, exist_ok=True)
 PAGE_LATEST = os.path.join(SPOOL, "page-latest.json")
 PAGE_LOG = os.path.join(SPOOL, "pages.log.jsonl")
 PENDING = os.path.join(SPOOL, "decisions-pending.json")
+LAST_SIG = [""]
+
+
+def take_pending():
+    if not os.path.exists(PENDING):
+        return None
+    try:
+        body = open(PENDING, "rb").read()
+        json.loads(body)
+    except Exception:
+        return None
+    os.replace(PENDING, os.path.join(
+        SPOOL, time.strftime("decisions-applied-%Y%m%d-%H%M%S.json")))
+    return body
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -48,14 +62,22 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return self._reply(400)
         page["receivedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S")
-        tmp = PAGE_LATEST + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(page, f, ensure_ascii=False)
-        os.replace(tmp, PAGE_LATEST)
-        with open(PAGE_LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps(page, ensure_ascii=False) + "\n")
-        print(f"[page] {len(page.get('mods') or [])} mods  {page.get('url','')[:100]}",
-              flush=True)
+        sig = str(page.get("url", "")) + "|" + ",".join(
+            "%s:%s" % (m.get("modId"), m.get("decision")) for m in page.get("mods") or [])
+        if sig != LAST_SIG[0]:
+            LAST_SIG[0] = sig
+            tmp = PAGE_LATEST + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(page, f, ensure_ascii=False)
+            os.replace(tmp, PAGE_LATEST)
+            with open(PAGE_LOG, "a", encoding="utf-8") as f:
+                f.write(json.dumps(page, ensure_ascii=False) + "\n")
+            print(f"[page] {len(page.get('mods') or [])} mods  {page.get('url','')[:100]}",
+                  flush=True)
+        pending = take_pending()
+        if pending is not None:
+            print(f"[decisions] served {len(json.loads(pending))} via page response", flush=True)
+            return self._reply(200, b'{"decisions": ' + pending + b'}')
         return self._reply(204)
 
     def do_GET(self):
@@ -63,15 +85,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._reply(200, b'{"ok": true}')
         if self.path != "/decisions":
             return self._reply(404)
-        if not os.path.exists(PENDING):
+        body = take_pending()
+        if body is None:
             return self._reply(200, b"[]")
-        try:
-            body = open(PENDING, "rb").read()
-            json.loads(body)  # refuse to serve malformed decisions
-        except Exception:
-            return self._reply(200, b"[]")
-        os.replace(PENDING, os.path.join(
-            SPOOL, time.strftime("decisions-applied-%Y%m%d-%H%M%S.json")))
         print(f"[decisions] served {len(json.loads(body))}", flush=True)
         return self._reply(200, body)
 

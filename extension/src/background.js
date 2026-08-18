@@ -707,6 +707,23 @@ async function pollRelayDecisions() {
   let decisions;
   try { decisions = await response.json(); } catch (_error) { return; }
   if (!Array.isArray(decisions)) return;
+  await applyRelayDecisionList(decisions);
+}
+
+function armRelayPolling() {
+  relayLastActivity = Date.now();
+  if (relayPollTimer) return;
+  const tick = async () => {
+    relayPollTimer = null;
+    if (Date.now() - relayLastActivity > RELAY_IDLE_CUTOFF_MS) return;
+    try { await pollRelayDecisions(); } catch (_error) {}
+    relayPollTimer = setTimeout(tick, RELAY_POLL_MS);
+  };
+  relayPollTimer = setTimeout(tick, 500);
+}
+
+async function applyRelayDecisionList(decisions) {
+  if (!Array.isArray(decisions)) return;
   for (const decision of decisions) {
     const mod = decision && decision.mod;
     const status = String(decision && decision.status || "");
@@ -723,21 +740,9 @@ async function pollRelayDecisions() {
   }
 }
 
-function armRelayPolling() {
-  relayLastActivity = Date.now();
-  if (relayPollTimer) return;
-  const tick = async () => {
-    relayPollTimer = null;
-    if (Date.now() - relayLastActivity > RELAY_IDLE_CUTOFF_MS) return;
-    try { await pollRelayDecisions(); } catch (_error) {}
-    relayPollTimer = setTimeout(tick, RELAY_POLL_MS);
-  };
-  relayPollTimer = setTimeout(tick, 500);
-}
-
-function reportPageToRelay(message) {
+async function reportPageToRelay(message) {
   armRelayPolling();
-  return relayFetch("/page", {
+  const response = await relayFetch("/page", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -745,12 +750,20 @@ function reportPageToRelay(message) {
       mods: Array.isArray(message.mods) ? message.mods : [],
       reportedAt: new Date().toISOString()
     })
-  }).then(response => ({ ok: Boolean(response) }));
+  });
+  if (response && response.status === 200) {
+    try {
+      const body = await response.json();
+      await applyRelayDecisionList(body && body.decisions);
+    } catch (_error) {}
+  }
+  return { ok: Boolean(response) };
 }
 
 function handleRuntimeMessage(message, sender) {
   if (message && message.type === "open-options") return browser.runtime.openOptionsPage();
   if (message && message.type === "relay-page-report") return reportPageToRelay(message);
+  if (message && message.type === "relay-poll") return pollRelayDecisions().then(() => ({ ok: true }));
   if (message && message.type === "open-catalog") return openCatalog();
   if (message && message.type === "persist-local-delta") return persistLocalDelta(message);
   if (message && message.type === "persist-stream-cursor") return persistStreamCursor(message);

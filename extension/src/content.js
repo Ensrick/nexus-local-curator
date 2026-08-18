@@ -1348,6 +1348,26 @@
 
   let relayReportTimer = null;
   let lastRelayReportSignature = "";
+  let relayHeartbeatTimer = null;
+  let relayLastReportOkAt = 0;
+  const RELAY_HEARTBEAT_MS = 5000;
+  const RELAY_HEARTBEAT_CUTOFF_MS = 30 * 60 * 1000;
+
+  // The background event page suspends between events, killing its poll timer,
+  // so a visible curation tab heartbeats to wake it for decision pickup.
+  function ensureRelayHeartbeat() {
+    relayLastReportOkAt = Date.now();
+    if (relayHeartbeatTimer) return;
+    relayHeartbeatTimer = setInterval(() => {
+      if (Date.now() - relayLastReportOkAt > RELAY_HEARTBEAT_CUTOFF_MS) {
+        clearInterval(relayHeartbeatTimer);
+        relayHeartbeatTimer = null;
+        return;
+      }
+      if (document.visibilityState !== "visible") return;
+      sendRuntimeMessage({ type: "relay-poll" }).catch(() => {});
+    }, RELAY_HEARTBEAT_MS);
+  }
 
   function reportVisiblePageToRelay(tiles) {
     if (relayReportTimer) clearTimeout(relayReportTimer);
@@ -1371,8 +1391,12 @@
       if (!mods.length) return;
       const signature = location.href + "|" + mods.map(m => `${m.modId}:${m.decision}`).join(",");
       if (signature === lastRelayReportSignature) return;
-      lastRelayReportSignature = signature;
-      sendRuntimeMessage({ type: "relay-page-report", url: location.href, mods }).catch(() => {});
+      sendRuntimeMessage({ type: "relay-page-report", url: location.href, mods }).then(response => {
+        if (response && response.ok) {
+          lastRelayReportSignature = signature;
+          ensureRelayHeartbeat();
+        }
+      }).catch(() => {});
     }, 400);
   }
 

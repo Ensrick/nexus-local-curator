@@ -346,6 +346,7 @@
         statusButton("Show Hidden", "toggle-hidden"),
         statusButton("Show Blocked", "toggle-blocked"),
         statusButton("Show Skipped", "toggle-skipped"),
+        statusButton("Ask Claude", "relay-review"),
         statusButton("Manage", "open-options")
       );
       document.body.appendChild(badge);
@@ -1333,7 +1334,6 @@
       };
       updatePageStatus(tiles.length, counts);
       updateInlineResultSummary(tiles.length, hidden);
-      reportVisiblePageToRelay(tiles);
       updateLoadingIndicator();
       hideFacetSuffixes();
       const emptyCuratedPage = document.body.classList.contains("nlc-curated-active") && tiles.length > 0 && hidden === tiles.length;
@@ -1346,8 +1346,6 @@
     }
   }
 
-  let relayReportTimer = null;
-  let lastRelayReportSignature = "";
   let relayHeartbeatTimer = null;
   let relayLastReportOkAt = 0;
   const RELAY_HEARTBEAT_MS = 5000;
@@ -1369,35 +1367,36 @@
     }, RELAY_HEARTBEAT_MS);
   }
 
-  function reportVisiblePageToRelay(tiles) {
-    if (relayReportTimer) clearTimeout(relayReportTimer);
-    relayReportTimer = setTimeout(() => {
-      relayReportTimer = null;
-      const mods = [];
-      for (const tile of tiles) {
-        if (tile.classList.contains("nlc-hidden")) continue;
-        const mod = Core.readModTile(tile);
-        if (!mod) continue;
-        const decision = Core.decisionFor(state, mod);
-        mods.push({
-          game: mod.game,
-          modId: mod.modId,
-          title: mod.title,
-          sourceUrl: mod.sourceUrl,
-          author: { username: mod.author.username, userId: mod.author.userId },
-          decision: decision ? decision.status : ""
-        });
-      }
-      if (!mods.length) return;
-      const signature = location.href + "|" + mods.map(m => `${m.modId}:${m.decision}`).join(",");
-      if (signature === lastRelayReportSignature) return;
-      sendRuntimeMessage({ type: "relay-page-report", url: location.href, mods }).then(response => {
-        if (response && response.ok) {
-          lastRelayReportSignature = signature;
-          ensureRelayHeartbeat();
-        }
-      }).catch(() => {});
-    }, 400);
+  function reportVisiblePageToRelay() {
+    const allTiles = Array.from(document.querySelectorAll(TILE_SELECTOR));
+    const tiles = document.body.classList.contains("nlc-curated-active")
+      ? allTiles.filter(tile => tile.hasAttribute("data-nlc-api-tile"))
+      : allTiles.filter(tile => !tile.classList.contains("nlc-native-suppressed"));
+    const mods = [];
+    for (const tile of tiles) {
+      if (tile.classList.contains("nlc-hidden")) continue;
+      const mod = Core.readModTile(tile);
+      if (!mod) continue;
+      const decision = Core.decisionFor(state, mod);
+      mods.push({
+        game: mod.game,
+        modId: mod.modId,
+        title: mod.title,
+        sourceUrl: mod.sourceUrl,
+        author: { username: mod.author.username, userId: mod.author.userId },
+        decision: decision ? decision.status : ""
+      });
+    }
+    return sendRuntimeMessage({
+      type: "relay-page-report",
+      url: location.href,
+      mods,
+      requestedAt: new Date().toISOString()
+    }).then(response => {
+      const ok = Boolean(response && response.ok);
+      if (ok) ensureRelayHeartbeat();
+      return ok;
+    });
   }
 
   function scheduleApply(delay = 60) {
@@ -1521,6 +1520,13 @@
     const action = target.dataset.nlcAction;
     if (action === "open-options") {
       await sendRuntimeMessage({ type: "open-options" });
+      return;
+    }
+    if (action === "relay-review") {
+      target.textContent = "Sending…";
+      const ok = await reportVisiblePageToRelay().catch(() => false);
+      target.textContent = ok ? "Sent ✓" : "No relay";
+      setTimeout(() => { target.textContent = "Ask Claude"; }, 2500);
       return;
     }
     if (action === "toggle-hidden") {

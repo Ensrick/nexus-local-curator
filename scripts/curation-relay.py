@@ -74,10 +74,8 @@ class Handler(BaseHTTPRequestHandler):
                 f.write(json.dumps(page, ensure_ascii=False) + "\n")
             print(f"[page] {len(page.get('mods') or [])} mods  {page.get('url','')[:100]}",
                   flush=True)
-        pending = take_pending()
-        if pending is not None:
-            print(f"[decisions] served {len(json.loads(pending))} via page response", flush=True)
-            return self._reply(200, b'{"decisions": ' + pending + b'}')
+        # Pending decisions are served only via GET /decisions: piggybacking on
+        # this response would be silently discarded by extensions before 0.14.3.
         return self._reply(204)
 
     def do_GET(self):

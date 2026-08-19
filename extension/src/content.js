@@ -1347,23 +1347,36 @@
   }
 
   let relayHeartbeatTimer = null;
-  let relayLastReportOkAt = 0;
+  let relayLastActivityAt = 0;
+  let relayPollFailures = 0;
   const RELAY_HEARTBEAT_MS = 5000;
-  const RELAY_HEARTBEAT_CUTOFF_MS = 30 * 60 * 1000;
+  const RELAY_IDLE_CUTOFF_MS = 60 * 60 * 1000;
+  const RELAY_MAX_FAILURES = 12;
 
-  // The background event page suspends between events, killing its poll timer,
-  // so a visible curation tab heartbeats to wake it for decision pickup.
+  // The background event page suspends between events, killing its own poll
+  // timer, so the visible tab heartbeats to wake it for decision pickup. This
+  // arms on page load (not only on an explicit review request) because queued
+  // decisions must land whether or not the page was ever sent for review;
+  // polling is silent and stops itself when no relay answers.
   function ensureRelayHeartbeat() {
-    relayLastReportOkAt = Date.now();
+    relayLastActivityAt = Date.now();
+    relayPollFailures = 0;
     if (relayHeartbeatTimer) return;
-    relayHeartbeatTimer = setInterval(() => {
-      if (Date.now() - relayLastReportOkAt > RELAY_HEARTBEAT_CUTOFF_MS) {
+    relayHeartbeatTimer = setInterval(async () => {
+      if (document.visibilityState !== "visible") return;
+      if (relayPollFailures >= RELAY_MAX_FAILURES ||
+          Date.now() - relayLastActivityAt > RELAY_IDLE_CUTOFF_MS) {
         clearInterval(relayHeartbeatTimer);
         relayHeartbeatTimer = null;
         return;
       }
-      if (document.visibilityState !== "visible") return;
-      sendRuntimeMessage({ type: "relay-poll" }).catch(() => {});
+      const result = await sendRuntimeMessage({ type: "relay-poll" }).catch(() => null);
+      if (!result || !result.ok) {
+        relayPollFailures += 1;
+        return;
+      }
+      relayPollFailures = 0;
+      if (result.applied) relayLastActivityAt = Date.now();
     }, RELAY_HEARTBEAT_MS);
   }
 
@@ -1668,5 +1681,6 @@
   loadState().then(() => {
     observer.observe(document.documentElement, { childList: true, subtree: true });
     apply();
+    ensureRelayHeartbeat();
   }).catch(console.error);
 })();

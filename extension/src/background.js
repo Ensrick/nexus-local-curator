@@ -703,11 +703,12 @@ async function relayFetch(path, options) {
 
 async function pollRelayDecisions() {
   const response = await relayFetch("/decisions", { method: "GET" });
-  if (!response) return;
+  if (!response) return { ok: false, applied: 0 };
   let decisions;
-  try { decisions = await response.json(); } catch (_error) { return; }
-  if (!Array.isArray(decisions)) return;
+  try { decisions = await response.json(); } catch (_error) { return { ok: true, applied: 0 }; }
+  if (!Array.isArray(decisions)) return { ok: true, applied: 0 };
   await applyRelayDecisionList(decisions);
+  return { ok: true, applied: decisions.length };
 }
 
 function armRelayPolling() {
@@ -768,7 +769,7 @@ async function reportPageToRelay(message) {
 function handleRuntimeMessage(message, sender) {
   if (message && message.type === "open-options") return browser.runtime.openOptionsPage();
   if (message && message.type === "relay-page-report") return reportPageToRelay(message);
-  if (message && message.type === "relay-poll") return pollRelayDecisions().then(() => ({ ok: true }));
+  if (message && message.type === "relay-poll") return pollRelayDecisions();
   if (message && message.type === "open-catalog") return openCatalog();
   if (message && message.type === "persist-local-delta") return persistLocalDelta(message);
   if (message && message.type === "persist-stream-cursor") return persistStreamCursor(message);

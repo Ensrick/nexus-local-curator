@@ -94,6 +94,40 @@ class DecisionQueueSchemaTests(unittest.TestCase):
         self.assertEqual(rows[0]["status"], "keep")
         self.assertEqual(rows[0]["mod"]["modId"], "42")
 
+    def test_relay_consumes_legacy_and_timestamped_rows_unchanged(self):
+        variants = {
+            "legacy": [{
+                "status": "skip",
+                "mod": {"game": "skyrimspecialedition", "modId": "1772"},
+            }],
+            "timestamped": [{
+                "status": "keep",
+                "mod": {"game": "skyrimspecialedition", "modId": "42"},
+                "queuedAt": self.EXPECTED,
+            }],
+        }
+        with tempfile.TemporaryDirectory(prefix="curator-relay-") as raw:
+            root = pathlib.Path(raw)
+            for name, rows in variants.items():
+                with self.subTest(schema=name):
+                    spool = root / name
+                    original_argv = sys.argv[:]
+                    try:
+                        sys.argv = [original_argv[0], str(spool)]
+                        relay = load_script(f"curation_relay_{name}_test", "curation-relay.py")
+                    finally:
+                        sys.argv = original_argv
+
+                    pending = spool / "decisions-pending.json"
+                    pending.write_text(json.dumps(rows), encoding="utf-8")
+                    served = relay.take_pending()
+
+                    self.assertEqual(json.loads(served), rows)
+                    self.assertFalse(pending.exists())
+                    archives = list(spool.glob("decisions-applied-*.json"))
+                    self.assertEqual(len(archives), 1)
+                    self.assertEqual(json.loads(archives[0].read_text(encoding="utf-8")), rows)
+
 
 if __name__ == "__main__":
     unittest.main()

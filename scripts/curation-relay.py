@@ -23,7 +23,8 @@ def take_pending():
     if not os.path.exists(PENDING):
         return None
     try:
-        body = open(PENDING, "rb").read()
+        with open(PENDING, "rb") as stream:
+            body = stream.read()
         json.loads(body)
     except Exception:
         return None

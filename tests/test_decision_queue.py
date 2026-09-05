@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import importlib.util
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -12,6 +13,11 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
+# curator_state computes the Firefox profile root at import time.  CI runs on
+# Linux without APPDATA; these tests replace its I/O function before use, so a
+# deterministic inert root is sufficient and avoids coupling schema tests to
+# one desktop environment.
+os.environ.setdefault("APPDATA", str(ROOT / ".test-appdata"))
 
 import decision_queue  # noqa: E402
 

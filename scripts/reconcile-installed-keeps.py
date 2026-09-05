@@ -30,6 +30,7 @@ DEFAULT_SPOOL = pathlib.Path(os.environ.get("TEMP", ".")) / "nlc-relay"
 
 sys.path.insert(0, str(HERE))
 import curator_state  # noqa: E402
+from decision_queue import stamp_batch  # noqa: E402
 
 
 def enabled_names(instance: pathlib.Path, profile: str) -> list[str]:
@@ -173,7 +174,7 @@ def atomic_json(path: pathlib.Path, value: object) -> None:
     os.replace(temporary, path)
 
 
-def queue_plan(plan: dict, spool: pathlib.Path) -> pathlib.Path:
+def queue_plan(plan: dict, spool: pathlib.Path, *, now: dt.datetime | None = None) -> pathlib.Path:
     pending = spool / "decisions-pending.json"
     if pending.exists():
         raise RuntimeError(f"A curator batch is already pending: {pending}")
@@ -188,8 +189,10 @@ def queue_plan(plan: dict, spool: pathlib.Path) -> pathlib.Path:
         detail = "; ".join(f"{mod_id}: expected {expected}, found {actual}"
                            for mod_id, expected, actual in drift[:10])
         raise RuntimeError(f"Live curator state drifted; refusing the entire batch. {detail}")
-    batch = [{"status": change["desiredStatus"], "mod": change["mod"]}
-             for change in plan["changes"]]
+    batch = stamp_batch([
+        {"status": change["desiredStatus"], "mod": change["mod"]}
+        for change in plan["changes"]
+    ], now=now)
     atomic_json(pending, batch)
     return pending
 

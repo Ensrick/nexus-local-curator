@@ -22,19 +22,24 @@ user changed while the review was running.
 """
 import datetime, io, json, os, sys
 
+from decision_queue import stamp_batch
+
 VALID = {'keep', 'trim', 'maybe', 'skip', 'unreviewed'}
 SPOOL = os.path.join(os.environ.get('TEMP', '.'), 'nlc-relay')
 PENDING = os.path.join(SPOOL, 'decisions-pending.json')
 PAGE = os.path.join(SPOOL, 'page-latest.json')
 
 
-def write_batch(status, titles, ids):
-    batch = [{'status': status,
-              'mod': {'game': 'skyrimspecialedition', 'modId': str(i), 'title': titles[i],
-                      'sourceUrl': f'https://www.nexusmods.com/skyrimspecialedition/mods/{i}'}}
-             for i in ids]
+def write_batch(status, titles, ids, *, now=None):
+    batch = stamp_batch([
+        {'status': status,
+         'mod': {'game': 'skyrimspecialedition', 'modId': str(i), 'title': titles[i],
+                 'sourceUrl': f'https://www.nexusmods.com/skyrimspecialedition/mods/{i}'}}
+        for i in ids
+    ], now=now)
     tmp = PENDING + '.tmp'
-    json.dump(batch, open(tmp, 'w', encoding='utf-8'), indent=1)
+    with open(tmp, 'w', encoding='utf-8') as handle:
+        json.dump(batch, handle, indent=1)
     os.replace(tmp, PENDING)
     for i in ids:
         print(f'  {status} {i} {titles[i]}')

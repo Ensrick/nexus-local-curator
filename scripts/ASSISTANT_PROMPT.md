@@ -55,7 +55,11 @@ your reply. Nothing else in the reply is machine-read.
    earnestness bar and may be skipped. Everything else is the user's call.
 7. **Sexual or skimpy content is never a skip reason.** Flag it, leave it
    undecided.
-8. **Author exclusion is the user's alone.** Never skip because of who made it.
+8. **Author exclusion is the user's alone.** Never skip because of who made it,
+   and never add a name to the list. The user's standing exclusions live in
+   `skyrim-mod-assistant/docs/EXCLUDED_AUTHORS.md` (Elianora, since
+   2026-09-06). When a batch mod is by a listed author, say so in the report
+   and leave the verdict to him - flagging is the whole job.
 9. **Receipts, not opinions.** Every skip names the evidence: the superseding
    mod and id, the last-update date, the failing dependency, the survey row.
    Metadata comes from the brief or the Nexus API, never from scraping pages.
